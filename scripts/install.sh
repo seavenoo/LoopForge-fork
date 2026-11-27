@@ -149,7 +149,7 @@ if ! docker_access compose ps --status running --services 2>/dev/null | grep -qx
   fi
 fi
 
-dev_compose=compose.yaml:compose.dev.yaml
+dev_compose=compose.yaml:compose.dev.yaml:compose.override.yaml
 if [[ "${LOOPFORGE_BUILD_FROM_SOURCE:-0}" == 1 && "${COMPOSE_FILE:-}" != "$dev_compose" ]]; then
   # Persisted because sudo-run Compose only reads .env; later plain compose commands keep the source stack.
   python3 - "$dev_compose" <<'PY'
@@ -159,6 +159,12 @@ text=re.sub(r'(?m)^COMPOSE_FILE=.*\n?','',p.read_text())
 p.write_text(text.rstrip('\n')+'\nCOMPOSE_FILE='+sys.argv[1]+'\n')
 PY
   export COMPOSE_FILE="$dev_compose"
+fi
+
+# 任何路径都必须带 override：COMPOSE_FILE 一旦被显式设置，Compose 不再自动加载
+# compose.override.yaml，MySQL 调优参数就会退回默认值。
+if [[ -f compose.override.yaml && "${COMPOSE_FILE:-}" != *compose.override.yaml* ]]; then
+  export COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}:compose.override.yaml"
 fi
 
 if [[ "${COMPOSE_FILE:-}" != "$dev_compose" ]]; then

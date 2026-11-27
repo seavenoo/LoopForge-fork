@@ -19,10 +19,27 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 source scripts/docker-access.sh
 source scripts/ghcr-mirror.sh
 
+# compose 文件列表固定在脚本内，override 永远最后。
+# 背景：曾用 compose.yaml+compose.dev.yaml 重建 mysql，漏掉 override，
+# MySQL 调优参数（sort_buffer_size 等）整段丢失，列表接口持续报
+# Error 1038 (HY001) Out of sort memory。所有 compose 调用都必须经过本函数。
+loopforge_compose_files() {
+  local files="compose.yaml"
+  if grep -qs -E '^COMPOSE_FILE=.*compose\.dev\.yaml' .env || [[ "${LOOPFORGE_BUILD_FROM_SOURCE:-0}" == 1 ]]; then
+    files="${files}:compose.dev.yaml"
+  fi
+  [[ -f compose.override.yaml ]] && files="${files}:compose.override.yaml"
+  printf '%s' "$files"
+}
+
 compose() {
   [[ -f .env ]] || docker_access_fail 'Not installed yet. Run ./start.sh first.'
   select_docker_access || docker_access_fail 'Docker is not running, or this user cannot access it.'
-  docker_access compose --profile platform "$@"
+  local -a files=()
+  local _cf f
+  IFS=':' read -r -a _cf <<< "$(loopforge_compose_files)"
+  for f in "${_cf[@]}"; do files+=(-f "$f"); done
+  docker_access compose "${files[@]}" --profile platform "$@"
 }
 
 cmd="${1:--d}"
@@ -36,7 +53,7 @@ import pathlib,re
 p=pathlib.Path('.env')
 p.write_text(re.sub(r'(?m)^COMPOSE_FILE=.*\n?','',p.read_text()))
 PY
-    COMPOSE_FILE=compose.yaml bash scripts/install.sh
+    COMPOSE_FILE=compose.yaml:compose.override.yaml bash scripts/install.sh
     ;;
   pull)
     # An empty MIRROR keeps the original refresh. A registry host pulls the pinned
